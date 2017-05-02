@@ -1,6 +1,8 @@
 #-*- coding: utf-8 -*-
 
+import os
 import json
+from urllib2 import urlopen
 import web
 import sys
 import config
@@ -9,12 +11,26 @@ import utils
 from proxy import Proxy
 from sqlhelper import SqlHelper
 
+cur_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+static_path = os.path.join(cur_path, 'static')
+if not os.path.exists(static_path):
+    os.makedirs(static_path)
+
 urls = (
     '/', 'index',
     '/insert', 'insert',
     '/select', 'select',
-    '/delete', 'delete'
+    '/delete', 'delete',
+    '/refresh_proxy', 'refresh',
 )
+
+proxy_urls = [
+    ("proxy_https.txt", "http://localhost:%s/select?https=yes" % config.data_port),
+    ("proxy_all.txt", "http://localhost:%s/select" % config.data_port),
+    ("proxy_anony1.txt", "http://localhost:%s/select?anonymity=1" % config.data_port),
+    ("proxy_anony2.txt", "http://localhost:%s/select?anonymity=2" % config.data_port),
+    ("proxy_anony3.txt", "http://localhost:%s/select?anonymity=3" % config.data_port),
+]
 
 
 def run_data_server():
@@ -23,9 +39,31 @@ def run_data_server():
     app.run()
 
 
+class refresh(object):
+    def GET(self):
+        for filename, url in proxy_urls:
+            resp = urlopen(url)
+            data = resp.read()
+            if data:
+                data = json.loads(data)
+            else:
+                continue
+            with open(os.path.join(static_path, filename), "w") as f:
+                for item in data:
+                    ip = item['ip']
+                    port = item['port']
+                    https = item['https']
+                    protocal = 'https' if https == 'yes' else 'http'
+                    f.write("{}\t{}\t{}\n".format(protocal, ip, port))
+        return ""
+
 class index(object):
     def GET(self):
-        return "Hello World!"
+        s = "Hello World!\n\n"
+        urls = []
+        for filename, url in proxy_urls:
+            s += "http://localhost:%s/statis/%s\n" % (config.data_port, filename)
+        return s
 
 
 class insert(object):
@@ -62,12 +100,12 @@ class select(object):
         try:
             sql = SqlHelper()
             inputs = web.input()
-            name = inputs.get('name')
+            name = inputs.get('name', 'httpbin')
             anonymity = inputs.get('anonymity', None)
             https = inputs.get('https', None)
             order = inputs.get('order', 'speed')
             sort = inputs.get('sort', 'asc')
-            count = inputs.get('count', 100)
+            count = inputs.get('count', 10000)
 
             command = ''
             if anonymity is None and https is None:
